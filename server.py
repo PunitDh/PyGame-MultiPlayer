@@ -1,9 +1,12 @@
+import pickle
 import socket as s
 from _thread import *
 import os
 import sys
 
-from helper import make_pos, read_pos
+from constants import COLOR
+from game import Game
+from player import Player
 
 server = "192.168.0.91"
 port = 5555
@@ -18,43 +21,58 @@ except s.error as e:
 socket.listen(2)
 print("Waiting for a connection, server started")
 
-pos = [(0, 0), (100, 100)]
+connected = set()
+games = {}
+id_count = 0
 
 
-def threaded_client(conn, player):
-    conn.send(str.encode(make_pos(pos[player])))
-    reply = ""
+def threaded_client(connection, current_player, game_id_thread):
+    global id_count
+    connection.send(str.encode(str(current_player)))
     while True:
         try:
-            data = read_pos(conn.recv(2048).decode())
-            pos[player] = data
-
-            if not data:
-                print("Disconnected")
-                break
-            else:
-                if player == 1:
-                    reply = pos[0]
+            data = connection.recv(4096).decode()
+            if game_id_thread in games:
+                game = games[game_id_thread]
+                if not data:
+                    break
                 else:
-                    reply = pos[1]
-                print("Received: ", data)
-                print("Sending: ", reply)
+                    if data == "reset":
+                        game.reset_went()
+                    elif data != "get":
+                        game.play(current_player, data)
+                    # end
+                    connection.sendall(pickle.dumps(game))
+            else:
+                break
             # end
-            conn.sendall(str.encode(make_pos(reply)))
         except:
             break
         # end
-    print("Lost connection")
-    conn.close()
+    print("Lost connection...")
+    try:
+        del games[game_id_thread]
+        print("Closing game", game_id_thread)
+    except:
+        pass
+    id_count -= 1
+    connection.close()
     # end
 # end
 
 
-current_player = 0
-
 while True:
     conn, addr = socket.accept()
     print("Connected to:", addr)
-    start_new_thread(threaded_client, (conn, current_player))
-    current_player += 1
+    id_count += 1
+    player = 0
+    game_id = (id_count - 1)//2
+    if id_count % 2 == 1:
+        games[game_id] = Game(game_id)
+        print("Creating a new game...")
+    else:
+        games[game_id].ready = True
+        player = 1
+    # end
+    start_new_thread(threaded_client, (conn, player, game_id))
 # end
